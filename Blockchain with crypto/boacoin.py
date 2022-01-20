@@ -1,28 +1,36 @@
 """
 Author: Abhiraj Mengade
-Date:   17-01-2022
+Date:   20-01-2022
 Description:
-A basic blockchain implementation in python
+A basic cryptocoin  implementation on a blockchain in python 
 """
 #imports
+from re import A
 import time
 import hashlib
 import json
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
+import requests
+from uuid import uuid4
+from urllib.parse import urlparse
 
 
 
 class blockchain:
     def __init__(self):
         self.chain = []
+        self.transactions=[]
         self.new_block(previous_hash=1, proof=100)
+        self.nodes = set()
     def new_block(self, proof, previous_hash=None):
         block = {
             'index': len(self.chain) + 1,
-            'timestamp': time(),
+            'timestamp': time.time(),
             'proof': proof,
             'previous_hash': previous_hash,
+            'transactions': self.transactions
         }
+        self.transactions=[]
         self.chain.append(block)
         return block
     
@@ -59,22 +67,74 @@ class blockchain:
             previous_block = block
             block_index += 1
         return True
+    
+    def add_transactions(self,sender, receiver, amount):
+        self.transactions.append({
+            'sender':sender,
+            'receiver':receiver,
+            'boas': amount
+        })
+        previous_block = self.last_block()
+        return previous_block['index'] + 1
+
+
+    def add_node(self, address):
+        parsed_url= urlparse(address)
+        self.nodes.add(parsed_url.netloc)
+
+    def replace_chain(self):
+        network = self.nodes
+        longest_chain = None
+        max_length = len(self.chain)
+        for node in network:
+            response = requests.get(f'http://{node}/get_chain')
+            if response.status_code ==200:
+                length = response.json()['length']
+                chain = response.json()['chain']
+                if length > max_length and self.is_chain_valid(chain):
+                    max_length=length
+                    longest_chain= chain
+        if longest_chain:
+            self.chain = longest_chain
+            return True 
+        return False
+
+
+
+
+
+
+
+
+
+
+        
+
+
+
+    
+
+
 #starting flask
 app = Flask(__name__)
 blockybalboa = blockchain()
+node_address = str(uuid4()).replace('-','')
 
 @app.route('/mine_block', methods=['GET'])
 def mine_block():
     previous_block = blockybalboa.last_block()
     previous_proof = previous_block['proof']
     proof = blockybalboa.proof_of_work(previous_proof)
+    blockybalboa.add_transactions(sender = node_address, receiver='Abhiraj', amount=3.14)
     previous_hash = blockybalboa.hash(previous_block)
-    blockybalboa.new_block(proof, previous_hash)
+    
+    block = blockybalboa.new_block(proof, previous_hash)
     response = {
         'message': 'New Block Forged',
-        'index': blockybalboa.last_block()['index'],
-        'proof': blockybalboa.last_block()['proof'],
-        'previous_hash': blockybalboa.last_block()['previous_hash'],
+        'index': block['index'],
+        'proof': block['proof'],
+        'previous_hash': block['previous_hash'],
+        'transactions': block['transactions']
     }
     return jsonify(response), 200
 
@@ -101,3 +161,14 @@ def is_valid():
         }
     return jsonify(response), 200
 
+@app.route('/add_transaction', methods=['POST'])
+def add_transaction():
+    request_data = request.get_json()
+    transaction_keys = ['sender', 'receiver', 'amount']
+    if not all (key in request_data for key in transaction_keys):
+        return 'Some elements of the transaction are missing', 400
+    index = blockybalboa.add_transactions(request_data['sender'], request_data['receiver'], request_data['boas'])
+    response = {
+        'message': f'This transaction will be added to Blockyboa {index}'
+    }
+    return jsonify(response), 201
